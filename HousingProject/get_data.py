@@ -18,9 +18,10 @@ from sklearn.compose import ColumnTransformer
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_squared_error
 from sklearn.tree import DecisionTreeRegressor
-from sklearn.model_selection import cross_val_score
+from sklearn.model_selection import cross_val_score, GridSearchCV
 from sklearn.ensemble import RandomForestRegressor
 import joblib
+from scipy import stats
 
 # DOWNLOAD_ROOT = "https://github.com/ageron/handson-ml2/blob/master/" - raw data 여야 에러 안나는듯?
 DOWNLOAD_ROOT = "https://raw.githubusercontent.com/ageron/handson-ml2/master/"
@@ -288,15 +289,52 @@ lin_scores = cross_val_score(
 lin_rmse_scores = np.sqrt(-lin_scores)
 # display_scores(lin_rmse_scores)
 
-forest_reg = RandomForestRegressor()
-forest_reg.fit(housing_prepared, housing_labels)
-forest_scores = cross_val_score(
-    forest_reg, housing_prepared, housing_labels, scoring="neg_mean_squared_error", cv=10)
-forest_rmse_scores = np.sqrt(-forest_scores)
+# forest_reg = RandomForestRegressor()
+# forest_reg.fit(housing_prepared, housing_labels)
+# forest_scores = cross_val_score(
+#     forest_reg, housing_prepared, housing_labels, scoring="neg_mean_squared_error", cv=10)
+# forest_rmse_scores = np.sqrt(-forest_scores)
 # display_scores(forest_rmse_scores)
 
 # 실험 모델 저장
 # 교차 검증 점수와 실제 예측값, 하이퍼파라미터와 훈련된 모델 파라미터 모두 저장
 # 여러 모델의 점수와 모델이 만든 오차를 쉽게 비교 가능
-joblib.dump(my_model, "my_model.pkl")
-my_model_load = joblib.load("my_model.pkl")
+# joblib.dump(my_model, "my_model.pkl")
+# my_model_load = joblib.load("my_model.pkl")
+
+# 세부 튜닝
+# 탐색하고자 하는 하이퍼파라미터와 시도해볼 값 지정 - 모든 하이퍼파라미터 조합에 대해 교차 검증 사용해 평가
+# 훈련 횟수: (3*4 + 2*3) * 5 = 90
+param_grid = [
+    {'n_estimators': [3, 10, 30], 'max_features': [2, 4, 6, 8]},
+    {'bootstrap': False, 'n_estimators': [3, 10], 'max_features':[2, 3, 4]},
+]
+# RandomForestRegressor에 대한 최적의 하이퍼파라미터 조합 탐색
+forest_reg = RandomForestRegressor()
+grid_search = GridSearchCV(forest_reg, param_grid, cv=5,
+                           scoring='neg_mean_squared_error', return_train_score=True)
+grid_search.fit(housing_prepared, housing_labels)
+# print(grid_search.best_params_)
+# print(grid_search.best_estimator_)
+
+# 평가점수 확인
+# cvres = grid_search.cv_results_
+# for mean_score, params in zip(cvres["mean_test_score"], cvres["params"]):
+#     print(np.sqrt(-mean_score), params)
+
+# 최종 모델 평가
+final_model = grid_search.best_estimator_
+
+X_test = strat_test_set.drop("median_house_value", axis=1)
+Y_test = strat_test_set["median_house_value"].copy()
+
+X_test_prepared = full_pipeline.transform(X_test)
+
+final_predictions = final_model.predict(X_test_prepared)
+
+final_mse = mean_squared_error(Y_test, final_predictions)
+final_rmse = np.sqrt(final_mse)
+confidence = 0.95
+squared_errors = (final_predictions - Y_test) ** 2
+np.sqrt(stats.t.interval(confidence, len(squared_errors)-1,
+                         loc=squared_errors.mean(), scale=stats.sem(squared_errors)))
